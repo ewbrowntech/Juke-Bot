@@ -1,2 +1,5 @@
 .idea/
+download_folder/
+venv/
+test/
 /bot_token.txt

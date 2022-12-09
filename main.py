@@ -1,5 +1,5 @@
 import discord
-from download import download_command
+from download import process_download_command
 
 class JukeBotClient(discord.Client):
     async def on_ready(self):
@@ -21,7 +21,7 @@ async def detect_commands(message):
     if message.content.startswith('!hello'):
         await message.channel.send('Hello!')
     if message.content.startswith('!download'):
-        await download_command(message)
+        await process_download_command(message)
 
 # Get Discord bot token from file
 with open('bot_token.txt', 'r') as file:
