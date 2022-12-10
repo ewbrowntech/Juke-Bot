@@ -1,5 +1,5 @@
 import discord
-from download import process_download_command
+from download import process_download_command, determine_upload_limit
 
 class JukeBotClient(discord.Client):
     async def on_ready(self):

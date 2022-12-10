@@ -1,5 +1,6 @@
 from pytube import YouTube
 import ffmpeg
+import discord
 import re
 import os
 
@@ -11,6 +12,8 @@ download.py
 
 Get the URL of a YouTube video from a message and download the associated video
 '''
+
+downloadsPath = os.path.join(os.getcwd(), "download_folder")
 
 async def process_download_command(message):
     filetype = get_filetype(message.content)
@@ -26,7 +29,13 @@ async def process_download_command(message):
     title = get_title(url)
 
     await message.channel.send('Downloading ' + "**" + title + "** as " + filetype + '...')
-    manage_download_process(url, filetype)
+    filepath = await manage_download_process(url, filetype, title, message.channel)
+    await upload_file(message.channel, filepath)
+
+# Register the "upload_size" command
+def determine_upload_limit(server):
+    uploadLimit = server.filesize_limit / 1_048_576  # Return the maximum file upload size in megabytes
+    return uploadLimit
 
 # Get desired filetype from message
 def get_filetype(messageContents):
@@ -47,7 +56,6 @@ def get_url(messageContents):
     else: url = None
     return url
 
-
 # Determine if the specified YouTube URL exists and points to a video
 def isVideo():
     pass
@@ -56,46 +64,76 @@ def isVideo():
 def get_title(url):
     return YouTube(url).title
 
-def manage_download_process(url, filetype):
+async def manage_download_process(url, filetype, title, channel):
+    global downloadsPath
     yt = YouTube(url)
     streams = yt.streams
     if filetype == "mp3":
-        download_audio(streams)
+        filepath = download_audio(streams, title)
+        return filepath
     elif filetype == "mp4":
-        audioPath = download_audio(streams)
+        await channel.send("This will take a bit...")
+        delete_existing_copy(title + ".mp4")
+        audioPath = download_audio(streams, title)
         videoPath = download_video(streams)
-        print(audioPath)
-        print(videoPath)
-        stitch_video(audioPath, videoPath)
+        filepath = stitch_video(audioPath, videoPath, title)
+        return filepath
 
-# Download audio track
-def download_audio(streams):
+# Get preferred audio stream and initiate download
+def download_audio(streams, title):
     audioStreams = streams.filter(only_audio=True)
     preferredStream = audioStreams.order_by("abr").last() # Get audio stream with the highest bit-rate
     if preferredStream.mime_type == "audio/webm":
-        perform_download_operation(preferredStream, "audio.webm")
-        return os.getcwd() + "\download_folder\\audio.webm"
+        filename = title + ".webm"
+        perform_download_operation(preferredStream, filename)
+        filepath = os.path.join(os.getcwd() + "\download_folder", filename)
+        return filepath
     elif preferredStream.mime_type == "audio/mp4":
-        perform_download_operation(preferredStream, "audio.mp4")
-        return os.getcwd() + "\download_folder\\audio.mp4"
+        filename = title + ".mp4"
+        perform_download_operation(preferredStream, filename)
+        filepath = os.path.join(os.getcwd() + "\download_folder", filename)
+        return filepath
 
-# Download video track
+# Get preferred video stream and initiate download
 def download_video(streams):
     videoStreams = streams.filter(only_video=True)
     preferredStream = videoStreams.order_by("resolution").last()  # Get video stream with the highest resolution
-    perform_download_operation(preferredStream, "video.mp4")
-    return os.getcwd() + "\download_folder\\video.mp4"
+    filename = "video.mp4"
+    perform_download_operation(preferredStream, filename)
+    filepath = os.path.join(os.getcwd() + "\download_folder", filename)
+    return filepath
 
+# Perform download of video from YouTube
 def perform_download_operation(stream, filename):
     print("Downloading Stream: " + str(stream))
     folderPath = os.getcwd() + "\download_folder\\"
-    print(folderPath)
     stream.download(folderPath, filename=filename)
     print("Download complete.")
 
-def stitch_video(audioPath, videoPath): # Stitch together audio and video streams
+# Stitch audio and video tracks together
+def stitch_video(audioPath, videoPath, title): # Stitch together audio and video streams
     inputAudio = ffmpeg.input(audioPath)
     inputVideo = ffmpeg.input(videoPath)
-    outputPath = os.getcwd() + "\download_folder\stiched.mp4"
-    print(outputPath)
+    outputFilename = title + ".mp4"
+    outputPath = os.path.join(os.getcwd() + "\download_folder", outputFilename)
+    print("Stitching video...")
     ffmpeg.output(inputVideo, inputAudio, outputPath).run()
+    print("Stitching complete.")
+    return outputPath
+
+# If a file with a given name exists in the download folder, delete it
+def delete_existing_copy(filename):
+    global downloadsPath
+    hypotheticalFilepath = os.path.join(downloadsPath, filename)
+    if os.path.exists(hypotheticalFilepath):
+        os.remove(hypotheticalFilepath)
+
+# If file is smaller than the upload limit of the server, send it in a message; otherwise, upload it to the cloud
+async def upload_file(channel, filepath):
+    server = channel.guild
+    uploadLimit = determine_upload_limit(server)
+    filesize = os.stat(filepath).st_size / 1_048_576  # Get size of output file in megabytes
+    if not filesize > uploadLimit:
+        await channel.send("Here you go!", file=discord.File(filepath))
+    else:
+        await channel.send('File is too big!')
